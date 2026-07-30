@@ -284,10 +284,37 @@ export const WorkspacePage: React.FC = () => {
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         {/* Left Panel — Document */}
         <div style={{ flex: 1, overflowY: 'auto', borderRight: '1px solid var(--border-color)', background: 'var(--bg-card)' }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 600 }}>文档原文</span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{clauses.length} 条款</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{clauses.length} 条款</span>
+              {id && (
+                <a
+                  href={`/api/v1/documents/${id}/file`}
+                  target="_blank" rel="noopener noreferrer"
+                  className="btn btn-outline"
+                  style={{ fontSize: 11, padding: '3px 10px', textDecoration: 'none' }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.open(`/api/v1/documents/${id}/file`, '_blank');
+                  }}
+                >
+                  打开原文
+                </a>
+              )}
+            </div>
           </div>
+          {/* Embedded document preview via iframe */}
+          {id && (
+            <div style={{ height: 300, borderBottom: '1px solid var(--border-color)', background: '#f5f5f5' }}>
+              <iframe
+                src={`/api/v1/documents/${id}/file`}
+                style={{ width: '100%', height: '100%', border: 'none' }}
+                title="Document Preview"
+                sandbox="allow-scripts allow-same-origin"
+              />
+            </div>
+          )}
           <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
             {clauses.map((c) => {
               const allFlags = [...highFlags, ...mediumFlags, ...lowFlags, ...sampledFlags];

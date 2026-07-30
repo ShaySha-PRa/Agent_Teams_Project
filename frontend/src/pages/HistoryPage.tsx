@@ -76,10 +76,16 @@ export const HistoryPage: React.FC = () => {
   const handleSearch = () => load(page);
 
   const handleRowClick = (doc: DocumentListItem) => {
-    if (doc.status === 'COMPLETED') navigate(`/review/${doc.document_id}/report`);
-    else if (doc.status === 'DRAFT' || doc.status === 'HUMAN_REVIEW') navigate(`/review/${doc.document_id}/workspace`);
-    else if (doc.status === 'REVIEWING') navigate(`/review/${doc.document_id}/reviewing`);
-    else navigate(`/review/${doc.document_id}/parsing`);
+    const st = doc.status;
+    if (st === 'COMPLETED') { navigate(`/review/${doc.document_id}/report`); return; }
+    if (st === 'DRAFT' || st === 'HUMAN_REVIEW') { navigate(`/review/${doc.document_id}/workspace`); return; }
+    if (st === 'REVIEWING') { navigate(`/review/${doc.document_id}/reviewing`); return; }
+    if (st === 'PARSING') { navigate(`/review/${doc.document_id}/parsing`); return; }
+    if (st === 'PARSED' || st === 'UPLOADED') { navigate(`/review/${doc.document_id}/reviewing`); return; }
+    if (st === 'FAILED') { navigate(`/review/${doc.document_id}/parsing`); return; }
+    if (st === 'CANCELLED') { navigate(`/review/${doc.document_id}/parsing`); return; }
+    if (st === 'REVIEWED') { navigate(`/review/${doc.document_id}/workspace`); return; }
+    navigate(`/review/${doc.document_id}/parsing`);
   };
 
   if (loading && items.length === 0) return <div className="page"><h1>历史审阅</h1><p>加载中...</p></div>;

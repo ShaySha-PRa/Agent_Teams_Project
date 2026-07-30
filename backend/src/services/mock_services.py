@@ -369,9 +369,95 @@ class MockReportService:
         return _ok(r)
 
     async def export_report(self, did, fmt, user):
-        return StreamingResponse(
-            io.BytesIO(b"%PDF-1.4\n%Report"), media_type="application/pdf",
-            headers={"Content-Disposition": f'attachment; filename="report_{did}.pdf"'})
+        """Generate a valid PDF report with Chinese text using reportlab."""
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import ParagraphStyle
+            from reportlab.lib.units import mm
+            from reportlab.lib.enums import TA_CENTER
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            import os, tempfile
+
+            # Try to register a Chinese font
+            font_name = "Helvetica"
+            for fp in ["C:/Windows/Fonts/msyh.ttc", "C:/Windows/Fonts/simhei.ttf"]:
+                if os.path.exists(fp):
+                    try:
+                        pdfmetrics.registerFont(TTFont("CNFont", fp))
+                        font_name = "CNFont"
+                        break
+                    except Exception:
+                        continue
+
+            r = _db.reports.get(did)
+            if not r:
+                raise HTTPException(status_code=404, detail={
+                    "code": "NOT_FOUND", "message": "Report not found",
+                    "data": None, "request_id": "req_test"})
+
+            buf = io.BytesIO()
+            doc = SimpleDocTemplate(buf, pagesize=A4,
+                                    topMargin=25*mm, bottomMargin=25*mm,
+                                    leftMargin=25*mm, rightMargin=25*mm)
+
+            title_st = ParagraphStyle("T", fontName=font_name, fontSize=18, leading=26, spaceAfter=8*mm, alignment=TA_CENTER)
+            head_st = ParagraphStyle("H", fontName=font_name, fontSize=13, leading=18, spaceBefore=5*mm, spaceAfter=2*mm)
+            body_st = ParagraphStyle("B", fontName=font_name, fontSize=11, leading=16, spaceBefore=1*mm, spaceAfter=1*mm)
+
+            story = [Paragraph("NDA 审阅报告", title_st)]
+            story.append(Paragraph(f"文档 ID: {did}", body_st))
+            story.append(Paragraph(f"生成时间: {r.get('generated_at', 'N/A')}", body_st))
+            story.append(Paragraph(f"签署状态: {r.get('sign_status', 'UNSIGNED')}", body_st))
+            story.append(Spacer(1, 6*mm))
+
+            agg = r.get("risk_aggregation", {})
+            story.append(Paragraph("风险聚合统计", head_st))
+            agg_items = [
+                f"高风险已确认: {agg.get('high_confirmed', 0)}",
+                f"高风险已修正: {agg.get('high_amended', 0)}",
+                f"高风险已驳回: {agg.get('high_rejected', 0)}",
+                f"中风险自动通过: {agg.get('medium_auto_passed', 0)}",
+                f"中风险已审核: {agg.get('medium_reviewed', 0)}",
+                f"低风险自动通过: {agg.get('low_auto_passed', 0)}",
+                f"低风险已抽查: {agg.get('low_spot_checked', 0)}",
+                f"手动补充标记: {agg.get('manual_added', 0)}",
+            ]
+            for item in agg_items:
+                story.append(Paragraph(f"  • {item}", body_st))
+
+            story.append(Spacer(1, 6*mm))
+            story.append(Paragraph("审计时间线", head_st))
+            for entry in _db.audit_logs[-20:]:
+                op = entry.get("operation_type", "?")
+                ts = entry.get("timestamp", "")[:19]
+                uid = entry.get("operator_id", "?")
+                story.append(Paragraph(f"  [{ts}] {op} — {uid}", body_st))
+
+            story.append(Spacer(1, 10*mm))
+            story.append(Paragraph("本报告由 AI 审阅系统自动生成，经人工审核后签署生效。", body_st))
+
+            doc.build(story)
+            buf.seek(0)
+            return StreamingResponse(
+                buf, media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="report_{did}.pdf"'})
+
+        except ImportError:
+            # Fallback: return a minimal valid PDF
+            minimal_pdf = (
+                b"%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+                b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+                b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n"
+                b"4 0 obj<</Length 44>>stream\nBT /F1 12 Tf 100 700 Td (Report) Tj ET\nendstream\nendobj\n"
+                b"5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\n"
+                b"xref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000272 00000 n \n0000000366 00000 n \n"
+                b"trailer<</Size 6/Root 1 0 R>>\nstartxref\n433\n%%EOF"
+            )
+            return StreamingResponse(
+                io.BytesIO(minimal_pdf), media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="report_{did}.pdf"'})
 
     async def sign_report(self, did, body, user):
         r = _db.reports.get(did)

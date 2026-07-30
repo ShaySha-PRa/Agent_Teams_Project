@@ -9,7 +9,9 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.database import get_db
 from core.security import CurrentUser, get_current_user
 
 router = APIRouter(prefix="", tags=["hitl"])
@@ -122,9 +124,17 @@ async def submit_document(
     body: dict[str, Any] = Body(...),
     user: CurrentUser = Depends(get_current_user),
     service=Depends(get_hitl_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Submit the review — all HIGH risk flags must be resolved."""
-    return await service.submit(document_id, body, user)
+    result = await service.submit(document_id, body, user)
+    # Also update the real SQLAlchemy document status
+    from sqlalchemy import select, update
+    from models.document import Document, DocumentStatus
+    stmt = update(Document).where(Document.id == document_id).values(status=DocumentStatus.COMPLETED)
+    await db.execute(stmt)
+    await db.commit()
+    return result
 
 
 @router.post("/documents/{document_id}/save-draft")

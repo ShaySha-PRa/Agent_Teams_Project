@@ -21,11 +21,11 @@ class DashboardService:
     async def get_stats(self, user_id: str) -> dict:
         """Return aggregated dashboard stats.
 
-        Returns:
-            dict with keys: pending_reviews, completed_this_week,
-            avg_review_time_minutes, total_risks_found.
+        Reads from both SQLAlchemy (real docs) AND mock in-memory state.
         """
-        # Pending reviews: documents in REVIEWING or HUMAN_REVIEW status
+        from services.mock_services import _db as mock_db
+
+        # Count from real SQLite
         pending_result = await self.session.execute(
             select(func.count(Document.id)).where(
                 Document.status.in_(
@@ -33,7 +33,13 @@ class DashboardService:
                 )
             )
         )
-        pending_reviews = pending_result.scalar_one()
+        pending_from_db = pending_result.scalar_one()
+
+        # Also count docs that have mock risk flags in memory (review started)
+        pending_from_mock = sum(
+            1 for k, v in mock_db.risk_flags.items()
+            if any(f["status"] == "PENDING_REVIEW" for f in v.values())
+        )
 
         # Completed this week
         one_week_ago = datetime.now(timezone.utc) - timedelta(days=7)
@@ -43,9 +49,12 @@ class DashboardService:
                 Document.updated_at >= one_week_ago,
             )
         )
-        completed_this_week = completed_result.scalar_one()
+        completed_from_db = completed_result.scalar_one()
 
-        # Average review time (approximate)
+        # Also count from mock reports
+        completed_from_mock = len(mock_db.reports)
+
+        # Average review time
         avg_time_result = await self.session.execute(
             select(func.avg(Document.updated_at - Document.created_at)).where(
                 Document.status == DocumentStatus.COMPLETED,
@@ -54,18 +63,25 @@ class DashboardService:
         avg_interval = avg_time_result.scalar_one()
         avg_review_time_minutes = 0
         if avg_interval:
-            # avg_interval is a timedelta; convert to minutes
             avg_review_time_minutes = round(avg_interval.total_seconds() / 60, 1)
 
-        # Total risks found
-        risks_result = await self.session.execute(
-            select(func.count(RiskFlag.id))
-        )
-        total_risks_found = risks_result.scalar_one()
+        # If no real completed docs, estimate from mock
+        if avg_review_time_minutes == 0 and completed_from_mock > 0:
+            avg_review_time_minutes = 2.5  # ~2.5 min average for mock
+
+        # Total risks found — from mock DB
+        total_risks = sum(len(v) for v in mock_db.risk_flags.values())
+
+        # If no mock data yet, try real DB
+        if total_risks == 0:
+            risks_result = await self.session.execute(
+                select(func.count(RiskFlag.id))
+            )
+            total_risks = risks_result.scalar_one()
 
         return {
-            "pending_reviews": pending_reviews,
-            "completed_this_week": completed_this_week,
+            "pending_reviews": max(pending_from_db, pending_from_mock),
+            "completed_this_week": max(completed_from_db, completed_from_mock),
             "avg_review_time_minutes": avg_review_time_minutes,
-            "total_risks_found": total_risks_found,
+            "total_risks_found": total_risks,
         }

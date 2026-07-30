@@ -9,6 +9,9 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.database import get_db
 
 from core.security import CurrentUser, get_current_user
 
@@ -47,9 +50,17 @@ async def start_review(
     document_id: str,
     user: CurrentUser = Depends(get_current_user),
     service=Depends(get_review_service),
+    db: AsyncSession = Depends(get_db),
 ):
     """Start AI review on a PARSED document."""
-    return await service.start_review(document_id, user)
+    result = await service.start_review(document_id, user)
+    # Update the real SQLAlchemy document status to REVIEWING
+    from sqlalchemy import update
+    from models.document import Document, DocumentStatus
+    stmt = update(Document).where(Document.id == document_id).values(status=DocumentStatus.REVIEWING)
+    await db.execute(stmt)
+    await db.commit()
+    return result
 
 
 @router.post("/documents/{document_id}/review/pause")

@@ -10,9 +10,9 @@ const STATUS_FILTERS = [
   { label: '全部', value: undefined },
   { label: '已完成', value: 'COMPLETED' },
   { label: '草稿', value: 'DRAFT' },
-  { label: '解析失败', value: 'FAILED_PARSE' },
-  { label: '审核失败', value: 'FAILED_REVIEW' },
+  { label: '解析失败', value: 'FAILED' },
   { label: '已取消', value: 'CANCELLED' },
+  { label: '审核中', value: 'REVIEWING' },
 ];
 
 export const HistoryPage: React.FC = () => {
@@ -36,15 +36,10 @@ export const HistoryPage: React.FC = () => {
 
       const res = await listDocuments({ page: p, size: 20, status: statusParam }) as PaginatedResponse<DocumentListItem>;
 
-      // Apply client-side filters that backend doesn't support
       let filtered = res.data.items;
-
-      // Text search (client-side for MVP)
       if (search) {
         filtered = filtered.filter(d => d.title.toLowerCase().includes(search.toLowerCase()));
       }
-
-      // Date range filter
       if (dateFrom) {
         const from = new Date(dateFrom);
         filtered = filtered.filter(d => d.uploaded_at && new Date(d.uploaded_at) >= from);
@@ -55,15 +50,8 @@ export const HistoryPage: React.FC = () => {
         filtered = filtered.filter(d => d.uploaded_at && new Date(d.uploaded_at) <= to);
       }
 
-      // "审核失败" filter: show failed documents that reached review stage
-      if (activeFilter === '审核失败') {
-        // Backend doesn't distinguish FAILED_PARSE vs FAILED_REVIEW yet
-        // In MVP, show all FAILED + CANCELLED as "审核失败"
-        filtered = res.data.items.filter(d => d.status === 'FAILED' || d.status === 'CANCELLED');
-      }
-
       setItems(filtered);
-      setTotal(filtered.length > 0 ? res.data.total : 0);
+      setTotal(res.data.total);
     } catch (e: any) {
       setError(e.message);
     } finally {

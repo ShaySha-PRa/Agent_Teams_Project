@@ -17,7 +17,12 @@ export async function uploadDocument(_formData: FormData): Promise<ApiResponse<D
 
 /** GET /documents */
 export async function listDocuments(_params?: { status?: string; page?: number; size?: number }): Promise<PaginatedResponse<DocumentListItem>> {
-  return apiGet('/documents');
+  const params = new URLSearchParams();
+  if (_params?.status) params.set('status', _params.status);
+  if (_params?.page) params.set('page', String(_params.page));
+  if (_params?.size) params.set('size', String(_params.size));
+  const qs = params.toString();
+  return apiGet(`/documents${qs ? '?' + qs : ''}`);
 }
 
 /** GET /documents/{id} */

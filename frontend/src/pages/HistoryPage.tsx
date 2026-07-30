@@ -6,7 +6,14 @@ import { listDocuments } from '../api/documents';
 import type { DocumentListItem } from '../types/document';
 import type { PaginatedResponse } from '../types/api';
 
-const FILTERS = ['全部', '已完成', '草稿', '解析失败', '审核失败'];
+const STATUS_FILTERS = [
+  { label: '全部', value: undefined },
+  { label: '已完成', value: 'COMPLETED' },
+  { label: '草稿', value: 'DRAFT' },
+  { label: '解析失败', value: 'FAILED_PARSE' },
+  { label: '审核失败', value: 'FAILED_REVIEW' },
+  { label: '已取消', value: 'CANCELLED' },
+];
 
 export const HistoryPage: React.FC = () => {
   const navigate = useNavigate();
@@ -17,28 +24,46 @@ export const HistoryPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const load = async (p: number) => {
     setLoading(true);
     setError('');
     try {
-      const statusMap: Record<string, string | undefined> = {
-        '已完成': 'COMPLETED',
-        '草稿': 'DRAFT',
-        '解析失败': 'FAILED',
-        '审核失败': 'FAILED',
-      };
-      const res = await listDocuments({
-        page: p,
-        size: 20,
-        status: activeFilter !== '全部' ? (statusMap[activeFilter] || undefined) : undefined,
-      }) as PaginatedResponse<DocumentListItem>;
-      setItems(res.data.items.filter(d => {
-        if (activeFilter === '审核失败') return false; // Backend doesn't distinguish this yet
-        if (search && !d.title.toLowerCase().includes(search.toLowerCase())) return false;
-        return true;
-      }));
-      setTotal(res.data.total);
+      const filterItem = STATUS_FILTERS.find(f => f.label === activeFilter);
+      const statusParam = filterItem?.value;
+
+      const res = await listDocuments({ page: p, size: 20, status: statusParam }) as PaginatedResponse<DocumentListItem>;
+
+      // Apply client-side filters that backend doesn't support
+      let filtered = res.data.items;
+
+      // Text search (client-side for MVP)
+      if (search) {
+        filtered = filtered.filter(d => d.title.toLowerCase().includes(search.toLowerCase()));
+      }
+
+      // Date range filter
+      if (dateFrom) {
+        const from = new Date(dateFrom);
+        filtered = filtered.filter(d => d.uploaded_at && new Date(d.uploaded_at) >= from);
+      }
+      if (dateTo) {
+        const to = new Date(dateTo);
+        to.setHours(23, 59, 59);
+        filtered = filtered.filter(d => d.uploaded_at && new Date(d.uploaded_at) <= to);
+      }
+
+      // "审核失败" filter: show failed documents that reached review stage
+      if (activeFilter === '审核失败') {
+        // Backend doesn't distinguish FAILED_PARSE vs FAILED_REVIEW yet
+        // In MVP, show all FAILED + CANCELLED as "审核失败"
+        filtered = res.data.items.filter(d => d.status === 'FAILED' || d.status === 'CANCELLED');
+      }
+
+      setItems(filtered);
+      setTotal(filtered.length > 0 ? res.data.total : 0);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -46,7 +71,9 @@ export const HistoryPage: React.FC = () => {
     }
   };
 
-  useEffect(() => { load(page); }, [page, activeFilter]);
+  useEffect(() => { load(page); }, [page, activeFilter, dateFrom, dateTo]);
+
+  const handleSearch = () => load(page);
 
   const handleRowClick = (doc: DocumentListItem) => {
     if (doc.status === 'COMPLETED') navigate(`/review/${doc.document_id}/report`);
@@ -61,19 +88,31 @@ export const HistoryPage: React.FC = () => {
     <div className="page">
       <h1 className="page-title">历史审阅</h1>
 
-      <div className="filter-bar">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid var(--border-color)', width: 300 }}>
+      {/* Search + Date Filter Bar */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', background: '#fff', borderRadius: 6, border: '1px solid var(--border-color)', width: 280 }}>
           <span>🔍</span>
           <input
             placeholder="关键词搜索..."
             value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') load(page); }}
+            onKeyDown={e => { if (e.key === 'Enter') handleSearch(); }}
             style={{ border: 'none', outline: 'none', width: '100%', fontSize: 13 }}
           />
         </div>
-        {FILTERS.map(f => (
-          <button key={f} className={`filter-pill ${f === activeFilter ? 'active' : ''}`} onClick={() => { setActiveFilter(f); setPage(1); }}>{f}</button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>日期:</span>
+          <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'inherit' }} />
+          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>至</span>
+          <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, fontFamily: 'inherit' }} />
+          {(dateFrom || dateTo) && <button className="btn btn-ghost" style={{ fontSize: 11 }} onClick={() => { setDateFrom(''); setDateTo(''); }}>清除</button>}
+        </div>
+      </div>
+
+      {/* Status Filter Pills */}
+      <div className="filter-bar">
+        {STATUS_FILTERS.map(f => (
+          <button key={f.label} className={`filter-pill ${f.label === activeFilter ? 'active' : ''}`} onClick={() => { setActiveFilter(f.label); setPage(1); }}>{f.label}</button>
         ))}
       </div>
 
@@ -86,7 +125,10 @@ export const HistoryPage: React.FC = () => {
           <div className="table-cell" style={{ width: 100 }}><span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>状态</span></div>
           <div className="table-cell" style={{ width: 100 }}><span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>操作</span></div>
         </div>
-        {items.length === 0 && <div className="card-padded"><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>暂无记录</span></div>}
+
+        {error && <div className="card-padded"><span style={{ color: 'var(--color-danger)', fontSize: 12 }}>{error}</span></div>}
+        {items.length === 0 && !error && <div className="card-padded"><span style={{ fontSize: 13, color: 'var(--text-muted)' }}>暂无记录</span></div>}
+
         {items.map(d => (
           <div key={d.document_id} className="table-row" onClick={() => handleRowClick(d)} style={{ cursor: 'pointer' }}>
             <div className="table-cell" style={{ width: 260 }}><span style={{ fontSize: 13, fontWeight: 500 }}>{d.title}</span></div>

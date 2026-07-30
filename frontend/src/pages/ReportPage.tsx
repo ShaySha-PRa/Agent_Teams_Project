@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { getReport, exportReport, signReport } from '../api/reports';
 import { getAuditLogs } from '../api/documents';
+import { AuditTimeline } from '../components/report/AuditTimeline';
 import type { ReviewReport } from '../types/report';
 import type { ApiResponse } from '../types/api';
 
@@ -105,6 +106,14 @@ export const ReportPage: React.FC = () => {
           <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>报告信息</h3>
           <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>生成时间: {report.generated_at}</p>
           <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>签署状态: {isSigned ? `已签署 (${report.signer_name})` : '待签署'}</p>
+        </div>
+      )}
+
+      {/* Audit Timeline */}
+      {id && (
+        <div className="card card-padded">
+          <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>审计追踪时间线</h3>
+          <AuditTimeline documentId={id} />
         </div>
       )}
 

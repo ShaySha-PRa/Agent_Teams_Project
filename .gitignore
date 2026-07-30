@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment files (keep template, ignore real values)
+.env
+.env.local
+.env.*.local
+
+# Python / uv
+__pycache__/
+*.pyc
+.venv/
+uv.lock
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite3
+
+# Storage
+storage/
+backend/storage/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+storage_test/
+
+# PDF test docs
+backend/scripts/storage/test_docs/
+
+# Lock files
+Pipfile.lock

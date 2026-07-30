@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { RiskBadge } from '../components/shared/RiskBadge';
 import { ApprovalCard } from '../components/approval/ApprovalCard';
@@ -8,6 +8,9 @@ import { EditForm } from '../components/approval/EditForm';
 import { SubmitConfirmDialog } from '../components/approval/SubmitConfirmDialog';
 import { getRiskFlags, approveRiskFlag, editRiskFlag, rejectRiskFlag, batchApproveRiskFlags, sampleRiskFlags, escalateRiskFlag, manualAddRiskFlag } from '../api/riskFlags';
 import { getReviewSummary, submitReview, saveDraft, getClauses } from '../api/documents';
+import { useWorkspaceKeyboard } from '../hooks/useWorkspaceKeyboard';
+import { useAutoDraft } from '../hooks/useAutoDraft';
+import { useToast } from '../context/ToastContext';
 import type { RiskFlag } from '../types/risk';
 import type { ReviewSummary } from '../types/review';
 import type { Clause } from '../types/risk';
@@ -18,6 +21,7 @@ import { useNavigate } from 'react-router-dom';
 export const WorkspacePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<'high' | 'medium' | 'low'>('high');
   const [highFlags, setHighFlags] = useState<RiskFlag[]>([]);
   const [mediumFlags, setMediumFlags] = useState<RiskFlag[]>([]);
@@ -28,6 +32,11 @@ export const WorkspacePage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [activeCardIdx, setActiveCardIdx] = useState(0);
+
+  // Refs for bidirectional sync
+  const clauseRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   // Dialogs
   const [rejectTarget, setRejectTarget] = useState<RiskFlag | null>(null);
@@ -43,7 +52,7 @@ export const WorkspacePage: React.FC = () => {
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualForm, setManualForm] = useState({ risk_level: 'HIGH' as RiskLevel, risk_category: '合规风险', description: '', clause_text: '', page: 1, para: 1 });
 
-  const flash = useCallback((msg: string) => { setSuccessMsg(msg); setTimeout(() => setSuccessMsg(''), 2500); }, []);
+  const flash = useCallback((msg: string) => { toast.show('success', msg); }, []);
 
   const loadData = useCallback(async () => {
     if (!id) return;
@@ -74,8 +83,9 @@ export const WorkspacePage: React.FC = () => {
     try {
       await approveRiskFlag(flagId, { comment: '确认' });
       flash('已确认风险标记');
+      markDirty();
       await loadData();
-    } catch (e: any) { setError(e.message); }
+    } catch (e: any) { toast.show('error', e.message || '操作失败'); }
   };
 
   // ── Edit ──
@@ -186,6 +196,61 @@ export const WorkspacePage: React.FC = () => {
 
   const totalHigh = highFlags.length + (summary?.approved_high_risk ?? 0);
 
+  // All actionable flags for keyboard navigation
+  const allActionableFlags = useMemo(() => {
+    const active: RiskFlag[] = [];
+    if (activeTab === 'high') active.push(...highFlags);
+    if (activeTab === 'medium') active.push(...mediumFlags.filter(f => f.status !== 'REVIEWED_CONFIRMED'));
+    if (activeTab === 'low') active.push(...lowFlags.filter(f => f.sampled));
+    return active;
+  }, [activeTab, highFlags, mediumFlags, lowFlags]);
+
+  // Bidirectional sync: click document clause → highlight right panel card
+  const scrollToCard = useCallback((flagId: string) => {
+    const el = cardRefs.current.get(flagId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  // Bidirectional sync: click risk card → highlight left panel clause
+  const scrollToClause = useCallback((clauseId: string) => {
+    const el = clauseRefs.current.get(clauseId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, []);
+
+  // Keyboard handlers
+  const handleKeyboardNext = useCallback(() => {
+    setActiveCardIdx(prev => Math.min(prev + 1, allActionableFlags.length - 1));
+  }, [allActionableFlags.length]);
+
+  const handleKeyboardPrev = useCallback(() => {
+    setActiveCardIdx(prev => Math.max(prev - 1, 0));
+  }, []);
+
+  const handleKeyboardApprove = useCallback(() => {
+    const f = allActionableFlags[activeCardIdx];
+    if (f) handleApprove(f.risk_flag_id);
+  }, [allActionableFlags, activeCardIdx]);
+
+  const handleKeyboardEsc = useCallback(() => {
+    if (editingId) setEditingId(null);
+    if (rejectTarget) setRejectTarget(null);
+    if (escalateTarget) setEscalateTarget(null);
+    if (showManualForm) setShowManualForm(false);
+    if (showSubmitDialog) setShowSubmitDialog(false);
+  }, [editingId, rejectTarget, escalateTarget, showManualForm, showSubmitDialog]);
+
+  useWorkspaceKeyboard({
+    onNext: handleKeyboardNext,
+    onPrev: handleKeyboardPrev,
+    onApprove: handleKeyboardApprove,
+    onSaveDraft: handleSaveDraft,
+    onEsc: handleKeyboardEsc,
+  });
+
+  // Auto draft
+  const hasUnsaved = useMemo(() => highFlags.length > 0 || mediumFlags.length > 0, [highFlags, mediumFlags]);
+  const { markDirty } = useAutoDraft(id, hasUnsaved, handleSaveDraft, false);
+
   if (loading) return <div className="page"><div className="page-header"><h1>审阅工作台</h1></div><p>加载中...</p></div>;
 
   return (
@@ -230,7 +295,7 @@ export const WorkspacePage: React.FC = () => {
               const risk = relatedFlag?.risk_level;
               const riskLower = risk?.toLowerCase() as 'high' | 'medium' | 'low' | undefined;
               return (
-                <div key={c.clause_id} className={`clause-block ${riskLower || ''}`}>
+                <div key={c.clause_id} className={`clause-block ${riskLower || ''}`} ref={(el) => { if (el) clauseRefs.current.set(c.clause_id, el); }}>
                   <div style={{ display: 'flex', gap: 10 }}>
                     {riskLower === 'high' && <div style={{ width: 4, borderRadius: 2, background: 'var(--risk-high)', flexShrink: 0 }} />}
                     {riskLower === 'medium' && <div style={{ width: 4, borderRadius: 2, background: 'var(--risk-medium)', flexShrink: 0 }} />}
@@ -274,7 +339,7 @@ export const WorkspacePage: React.FC = () => {
               </div>
             )}
             {activeTab === 'high' && highFlags.map((f, idx) => (
-              <div key={f.risk_flag_id}>
+              <div key={f.risk_flag_id} ref={(el) => { if (el) cardRefs.current.set(f.risk_flag_id, el); }}>
                 {editingId === f.risk_flag_id ? (
                   <EditForm
                     visible={true}
